@@ -20,7 +20,7 @@ watch oc get pod
 
 ## configure Vault
 ```
-oc rsh vault-0 
+oc -n vault rsh vault-0 
 
 vault auth enable kubernetes
 
@@ -33,10 +33,11 @@ exit
 
 ## Add Secret
 ```
-oc rsh vault-0 
+oc -n vault  rsh vault-0 
 
-vault kv put secret/data/vplugin/supersecret username="user-from-vault" password="password-from-vault"
-vault kv get secret/data/vplugin/supersecret
+vault kv put secret/vplugin/supersecret username="user-from-vault" password="pass-from-vault"
+vault kv get secret/vplugin/supersecret
+
 
 vault policy write vplugin - <<EOF
 path "secret/data/vplugin/supersecret" {
@@ -46,18 +47,21 @@ EOF
 
 vault write auth/kubernetes/role/vplugin \
     bound_service_account_names=vplugin \
-    bound_service_account_namespaces=vplugin-demo \
+    bound_service_account_namespaces=openshift-gitops \
     policies=vplugin \
     ttl=1h
+
+vault policy read vplugin
+vault read auth/kubernetes/role/vplugin 
+
 exit
 ```
 
-
-# Install OpenShift GitOps
+## Install OpenShift GitOps
 
 - https://github.com/redhat-developer/openshift-gitops-getting-started
 
-## Configure ArgoCD
+### Configure ArgoCD
 
 ```
 oc project openshift-gitops
@@ -70,11 +74,11 @@ metadata:
 EOF
 ```
 
-## Edit CR subscription "openshift-gitops-operator"
+### Edit CR subscription "openshift-gitops-operator"
 ```
 oc edit subscription openshift-gitops-operator -n openshift-operators
-````
-### 
+```
+
 ```
 spec:
   config:
@@ -83,7 +87,7 @@ spec:
         value: 'false'
 ```
 
-## Edit CR argocd "openshift-gitops"
+### Edit CR argocd "openshift-gitops"
 
 example: https://github.com/lcolagio/lab-vault/blob/master/openshift-gitops-conf/openshift-gitops.yml 
 
@@ -94,19 +98,19 @@ oc edit argocd openshift-gitops -n openshift-gitops
 ```
 spec:
 
-### Add Dex
+# Add Dex
 
   dex:
     openShiftOAuth: true
 
-### Add Rbac
+# Add Rbac
 
   rbac:
     defaultPolicy: 'role:readonly'
     policy: 'g, ADMIN, role:admin'
     scopes: '[groups]'
 
-### Add rebuilded image with plugin vault
+# Add rebuilded image with plugin vault
 
   repo:
     image: quay.io/pbmoses/pmo-argovault
@@ -114,7 +118,7 @@ spec:
     serviceaccount: vplugin
     version: v1.2
 
-### Add Plugin vault configuration
+# Add Plugin vault configuration
 
   configManagementPlugins: |-
     - name: argocd-vault-plugin
@@ -123,12 +127,116 @@ spec:
         args: ["generate", "./"]
 ```
 
-## check Added plugin configuration to cm
+### check Added plugin configuration to cm
 ```
 oc get cm  argocd-cm  -n openshift-gitops  -o yaml | more
 ```
 
-## check plugin
+### check plugin
 ```
 oc rsh $(oc get pod -o name | grep openshift-gitops-repo-server-) ls /usr/local/bin
 ```
+
+
+
+
+## Test usecases
+
+### create new application project with argocd right
+
+```
+oc new-project vplugin-demo
+
+cat << EOF | oc apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vplugin-demo-role-binding
+  namespace: vplugin-demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+- kind: ServiceAccount
+  name: openshift-gitops-argocd-application-controller
+  namespace: openshift-gitops
+EOF
+```
+
+### Test usecase without-vault
+
+```
+oc delete application app-without-vault -n openshift-gitops
+
+cat << EOF | oc apply -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-without-vault
+  namespace: openshift-gitops
+spec:
+  destination:
+    name: ''
+    namespace: vplugin-demo
+    server: 'https://kubernetes.default.svc'
+  source:
+    path: applications/app-without-vault
+    repoURL: 'https://github.com/lcolagio/lab-vault'
+    targetRevision: HEAD
+  project: default
+EOF
+```
+
+### Test usecase application with vault plugin
+
+```
+oc delete application app-with-vault -n openshift-gitops
+
+cat << EOF | oc apply -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-with-vault
+  namespace: openshift-gitops
+spec:
+  destination:
+    namespace: vplugin-demo
+    server: 'https://kubernetes.default.svc'
+  project: default
+  source:
+    path: applications/app-with-vault
+    plugin:
+      env:
+        - name: AVP_K8S_ROLE
+          value: vplugin
+        - name: AVP_TYPE
+          value: vault
+        - name: AVP_VAULT_ADDR
+          value: 'http://172.30.231.227:8200'
+        - name: AVP_AUTH_TYPE
+          value: k8s
+      name: argocd-vault-plugin
+    repoURL: 'https://github.com/lcolagio/lab-vault'
+    targetRevision: HEAD
+  syncPolicy: {}
+EOF
+```
+
+```
+# Application from git:
+ - https://github.com/lcolagio/lab-vault -> applications/app-with-vault
+kind: Secret
+apiVersion: v1
+metadata:
+  namespace: vplugin-demo
+  name: example-secret-vault
+  annotations:
+    ## avp_path: "secret/vplugin/supersecret"
+    avp_path: "secret/data/vplugin/supersecret"
+type: Opaque
+stringData:
+  username: <username>
+  password: <password>
+``` 
+
