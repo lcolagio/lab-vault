@@ -46,7 +46,7 @@ EOF
 
 vault write auth/kubernetes/role/vplugin \
     bound_service_account_names=vplugin \
-    bound_service_account_namespaces=vplugindemo \
+    bound_service_account_namespaces=vplugin-demo \
     policies=vplugin \
     ttl=1h
 exit
@@ -84,6 +84,9 @@ spec:
 ```
 
 ## Edit CR argocd "openshift-gitops"
+
+example: https://github.com/lcolagio/lab-vault/blob/master/openshift-gitops-conf/openshift-gitops.yml 
+
 ```
 oc edit argocd openshift-gitops -n openshift-gitops
 ```
