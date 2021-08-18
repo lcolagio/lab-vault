@@ -6,6 +6,7 @@
 
 ## Install Vault for dev
 
+```
 oc new-project vault
 oc project vault
 
@@ -16,9 +17,11 @@ oc adm policy add-scc-to-user privileged -z vault-agent-injector -n vault
 helm install vault hashicorp/vault --set \ "global.openshift=true" --set "server.dev.enabled=true"
 
 watch oc get pod
- 
+```
+
 ## configure Vault
 
+```
 oc rsh vault-0 
 
 vault auth enable kubernetes
@@ -43,5 +46,4 @@ vault write auth/kubernetes/role/vplugin0 \
     bound_service_account_namespaces=vplugindemo \
     policies=vplugin \
     ttl=1h
-
-
+```
