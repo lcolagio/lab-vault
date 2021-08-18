@@ -1,0 +1,17 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: <username>
+  namespace: openshift-gitops
+  annotations:
+    avp_path: "secret/data/vplugin/supersecret"
+spec:
+  destination:
+    name: ''
+    namespace: vplugin-demo
+    server: 'https://kubernetes.default.svc'
+  source:
+    path: applications/app-without-vault
+    repoURL: 'https://github.com/lcolagio/lab-vault'
+    targetRevision: HEAD
+  project: default
