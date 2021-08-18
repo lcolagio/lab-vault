@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: example-configmap-vault
+  namespace: vplugin-demo
+  annotations:
+    # avp_path: "secret/vplugin/supersecret"
+    avp_path: "secret/data/vplugin/supersecret"
+data:
+  example.property.1: <username>
+  example.property.2: <password>
