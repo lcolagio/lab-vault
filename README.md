@@ -68,7 +68,7 @@ exit
 
 - https://github.com/redhat-developer/openshift-gitops-getting-started
 
-### Configure ArgoCD
+### Add a service account for vault plugin
 
 ```
 oc project openshift-gitops
