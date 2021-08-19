@@ -6,5 +6,6 @@ serviceAccount:
   name: demo-helm
 
 secret:
+  create: true
   username: no-vault
   password: no-vault
