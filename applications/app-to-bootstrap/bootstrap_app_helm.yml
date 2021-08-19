@@ -24,4 +24,5 @@ spec:
     path: applications/app-helm
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
     targetRevision: HEAD
-  syncPolicy: {}
+  syncPolicy:
+    automated: {}
