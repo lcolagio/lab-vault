@@ -12,7 +12,7 @@ spec:
     server: 'https://kubernetes.default.svc'
   project: default
   source:
-    path: applications/app-to-bootstrap
+    path: applications/<app-path>
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
     targetRevision: HEAD
   syncPolicy: {}
