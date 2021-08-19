@@ -1,1 +1,18 @@
-xxx
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: boostrap-app1
+  namespace: openshift-gitops
+  annotations:
+    # avp_path: "secret/vplugin/supersecret"
+    avp_path: "secret/data/vplugin/supersecret"
+spec:
+  destination:
+    namespace: vplugin-demo
+    server: 'https://kubernetes.default.svc'
+  project: default
+  source:
+    path: applications/<app-name1>
+    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
+    targetRevision: HEAD
+  syncPolicy: {}
