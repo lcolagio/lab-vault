@@ -17,7 +17,7 @@ spec:
           value: app-helm
         - name: secret.name
           value: app-helm
-        - name: secret.name
+        - name: secret.username
           value: <username>
         - name: secret.password
           value: <password>
