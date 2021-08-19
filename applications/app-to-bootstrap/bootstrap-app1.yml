@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: <app-name1>
+  name: boostrap-app1
   namespace: openshift-gitops
   annotations:
     # avp_path: "secret/vplugin/supersecret"
