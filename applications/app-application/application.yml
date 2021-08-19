@@ -1,7 +1,7 @@
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: app-to-bootstarp
+  name: app-to-bootstrap
   namespace: openshift-gitops
   annotations:
     # avp_path: "secret/vplugin/supersecret"
@@ -12,7 +12,7 @@ spec:
     server: 'https://kubernetes.default.svc'
   project: default
   source:
-    path: applications/<appname>
+    path: applications/app-to-bootstrap
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
     targetRevision: HEAD
   syncPolicy: {}
