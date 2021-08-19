@@ -6,3 +6,7 @@ serviceAccount:
   create: true
   # Annotations to add to the service account
   name: demo-helm
+
+secret:
+  username: no-vault
+  password: no-vault
