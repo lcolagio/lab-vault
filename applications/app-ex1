@@ -1,0 +1,22 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: app-ex1
+  namespace: openshift-gitops
+  annotations:
+    avp_path: "secret/data/vplugin/supersecret"    
+spec:
+  selector:
+    matchLabels:
+      app: hello-openshift
+  replicas: 3
+  template:
+    metadata:
+      labels:
+        app: hello-openshift
+    spec:
+      containers:
+        - name: hello-openshift
+          image: openshift/hello-openshift
+          ports:
+            - containerPort: 8080
