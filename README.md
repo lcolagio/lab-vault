@@ -350,9 +350,9 @@ EOF
 ```
 
 This argocd application deploys this application that containts annotation to path and un field used by vault-plugin
-- https://github.com/lcolagio/lab-vault-plugin/tree/master/applications/app-ex1
-- https://github.com/lcolagio/lab-vault-plugin/tree/master/applications/app-ex2
-
+- https://github.com/lcolagio/lab-vault-plugin/blob/master/applications/app-to-bootstrap/bootstrap-app1.yml
+- https://github.com/lcolagio/lab-vault-plugin/blob/master/applications/app-to-bootstrap/bootstrap-app2.yml
+- https://github.com/lcolagio/lab-vault-plugin/blob/master/applications/app-to-bootstrap/bootstrap_app_helm1.yml 
 
 ```
 apiVersion: argoproj.io/v1alpha1
@@ -379,7 +379,7 @@ spec:
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: boostrap-appé
+  name: boostrap-app2
   namespace: openshift-gitops
   annotations:
     avp_path: "secret/data/vplugin/supersecret"
@@ -396,6 +396,65 @@ spec:
     automated: {}
 ```
 
+```
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: boostrap-app-helm1
+  namespace: openshift-gitops
+  annotations:
+    avp_path: "secret/data/vplugin/supersecret"
+spec:
+  destination:
+    namespace: vplugin-demo
+    server: 'https://kubernetes.default.svc'
+  project: default
+  source:
+    helm:
+      parameters:
+        - name: serviceAccount.name
+          value: app-helm1
+        - name: secret.name
+          value: app-helm1
+        - name: secret.username
+          value: <username>
+        - name: secret.password
+          value: <password>
+    path: applications/app-helm
+    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
+    targetRevision: HEAD
+  syncPolicy:
+    automated: {}
+  ```
+
+
+### 5 - Test to bootstrap helm application 
+
+oc delete application app-helm -n openshift-gitops
+
+cat << EOF | oc apply -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-helm
+  namespace: openshift-gitops
+spec:
+  destination:
+    namespace: vplugin-demo
+    server: 'https://kubernetes.default.svc'
+  project: default
+  source:
+    helm:
+      parameters:
+        - name: serviceAccount.name
+          value: app-helm
+        - name: secret.name
+          value: app-helm
+    path: applications/app-helm
+    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
+    targetRevision: HEAD
+  syncPolicy: {}
+EOF
 
 ## Some troubleshooting tips
 
@@ -459,3 +518,4 @@ Unable to create application: application spec is invalid: InvalidSpecError: Una
 ```
 rpc error: code = Unknown desc = `argocd-vault-plugin generate ./` failed exit status 1: Error: Error making API request. URL: PUT http://172.30.231.227:8200/v1/auth/kubernetes/login Code: 500. Errors: * namespace not authorized Usage: argocd-vault-plugin generate <path> [flags] Flags: -c, --config-path string path to a file containing Vault configuration (YAML, JSON, envfile) to use -h, --help help for generate -s, --secret-name string name of a Kubernetes Secret containing Vault configuration data in the argocd namespace of your ArgoCD host (Only available when used in ArgoCD) Error making API request. URL: PUT http://172.30.231.227:8200/v1/auth/kubernetes/login Code: 500. Errors: * namespace not authorized
 ```
+
