@@ -62,8 +62,6 @@ vault read auth/kubernetes/role/vplugin
 exit
 ```
 
->>>>>>>>>>>>>>>>
-
 ## Install OpenShift GitOps
 
 - https://github.com/redhat-developer/openshift-gitops-getting-started
@@ -349,11 +347,11 @@ spec:
 EOF
 ```
 
-This argocd application deploys this application that containts annotation to path and un field used by vault-plugin
+This argocd application app-to-bootstrap-with-vaultplugin bootstrap this applications that containts annotation to path and un field used by vault-plugin
 - https://github.com/lcolagio/lab-vault-plugin/blob/master/applications/app-to-bootstrap/bootstrap-app1.yml
 - https://github.com/lcolagio/lab-vault-plugin/blob/master/applications/app-to-bootstrap/bootstrap-app2.yml
 - https://github.com/lcolagio/lab-vault-plugin/blob/master/applications/app-to-bootstrap/bootstrap_app_helm1.yml 
-
+- https://github.com/lcolagio/lab-vault-plugin/blob/master/applications/app-to-bootstrap/bootstrap_app_helm2.yml 
 ```
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -427,6 +425,36 @@ spec:
     automated: {}
   ```
 
+```
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: boostrap-app-helm2
+  namespace: openshift-gitops
+  annotations:
+    avp_path: "secret/data/vplugin/supersecret"
+spec:
+  destination:
+    namespace: vplugin-demo
+    server: 'https://kubernetes.default.svc'
+  project: default
+  source:
+    helm:
+      parameters:
+        - name: serviceAccount.name
+          value: app-helm2
+        - name: secret.name
+          value: app-helm2
+        - name: secret.username
+          value: <username>
+        - name: secret.password
+          value: <password>
+    path: applications/app-helm
+    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
+    targetRevision: HEAD
+  syncPolicy:
+    automated: {}
+  ```
 
 ### 5 - Test to bootstrap helm application 
 
