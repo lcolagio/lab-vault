@@ -9,4 +9,4 @@ metadata:
 data:
   example.property.1: <username>
   example.property.2: <password>
-  example.property.3: <toto>
+  example.property.3: "<toto>"
