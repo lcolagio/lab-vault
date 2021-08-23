@@ -40,7 +40,7 @@ vault kv put secret/vplugin/supersecret \
  password="pass-from-vault" \
  app-path="app-to-bootstrap" \
  app-name1=app-ex1 \
- app-name2=app-ex2 \
+ app-name2=app-ex2
  
 vault kv get secret/vplugin/supersecret
 
