@@ -4,7 +4,7 @@ metadata:
   name: app-ex1
   namespace: vplugin-demo
   annotations:
-    avp_path: "secret/data/vplugin/supersecret"    
+    avp_path: "vplugin/data/example/example-auth"
 spec:
   selector:
     matchLabels:
