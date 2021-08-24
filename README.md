@@ -171,6 +171,8 @@ spec:
         args: ["generate", "./"]
 ```
 
+## Check Installation
+
 ### Check added plugin inside image
 
 ```
@@ -182,9 +184,10 @@ oc rsh $(oc get pod -o name | grep openshift-gitops-repo-server-) ls /usr/local/
 oc get cm  argocd-cm  -n openshift-gitops  -o yaml | more
 ```
 
-### Check Connection from pod openshift-gitops-repo-server-xxx
+### Check Connection from pod openshift-gitops-repo-server-xxx to vault
 ```
-oc -n openshift-gitops rsh $(oc get pod -o name | grep openshift-gitops-repo-server-)
+oc project openshift-gitops
+oc rsh $(oc get pod -o name | grep openshift-gitops-repo-server-)
 ```
 
 #### Get token SA vplugin
@@ -256,7 +259,7 @@ spec:
   source:
     path: applications/app-test-argocd
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: HEAD
+    targetRevision: vault-persistant
   project: default
 EOF
 ```
@@ -338,12 +341,12 @@ spec:
         - name: AVP_TYPE
           value: vault
         - name: AVP_VAULT_ADDR
-          value: 'http://172.30.231.227:8200'
+          value: 'http:/vault.vault.svc:8200'
         - name: AVP_AUTH_TYPE
           value: k8s
       name: argocd-vault-plugin
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: HEAD
+    targetRevision: vault-persistant
   syncPolicy: {}
 EOF
 ```
@@ -390,12 +393,12 @@ spec:
         - name: AVP_TYPE
           value: vault
         - name: AVP_VAULT_ADDR
-          value: 'http://172.30.231.227:8200'
+          value: 'http://vault.vault.svc:8200'
         - name: AVP_AUTH_TYPE
           value: k8s
       name: argocd-vault-plugin
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: HEAD
+    targetRevision: vault-persistant
   syncPolicy: {}
 EOF
 ```
@@ -421,7 +424,7 @@ spec:
   source:
     path: applications/<app-name1>
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: HEAD
+    targetRevision: vault-persistant
   syncPolicy:
     automated: {}
 ```
@@ -442,7 +445,7 @@ spec:
   source:
     path: applications/<app-name1>
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: HEAD
+    targetRevision: vault-persistant
   syncPolicy:
     automated: {}
 ```
@@ -473,7 +476,7 @@ spec:
           value: <password>
     path: applications/app-helm
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: HEAD
+    targetRevision: vault-persistant
   syncPolicy:
     automated: {}
   ```
@@ -504,7 +507,7 @@ spec:
           value: <password>
     path: applications/app-helm
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: HEAD
+    targetRevision: vault-persistant
   syncPolicy:
     automated: {}
   ```
@@ -533,7 +536,7 @@ spec:
           value: app-helm
     path: applications/app-helm
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: HEAD
+    targetRevision: vault-persistant
   syncPolicy: {}
 EOF
 
@@ -576,7 +579,7 @@ Example of correct output
 
 #### error 400 : No vault server available
 ```
-rpc error: code = Unknown desc = Manifest generation error (cached): `argocd-vault-plugin generate ./` failed exit status 1: Error: Error making API request. URL: PUT http://172.30.231.227:8200/v1/auth/kubernetes/login Code: 400. Errors: * missing client token Usage: argocd-vault-plugin generate <path> [flags] Flags: -c, --config-path string path to a file containing Vault configuration (YAML, JSON, envfile) to use -h, --help help for generate -s, --secret-name string name of a Kubernetes Secret containing Vault configuration data in the argocd namespace of your ArgoCD host (Only available when used in ArgoCD) Error making API request. URL: PUT http://172.30.231.227:8200/v1/auth/kubernetes/login Code: 400. Errors: * missing client token
+rpc error: code = Unknown desc = Manifest generation error (cached): `argocd-vault-plugin generate ./` failed exit status 1: Error: Error making API request. URL: PUT http://vault.vault.svc:8200/v1/auth/kubernetes/login Code: 400. Errors: * missing client token Usage: argocd-vault-plugin generate <path> [flags] Flags: -c, --config-path string path to a file containing Vault configuration (YAML, JSON, envfile) to use -h, --help help for generate -s, --secret-name string name of a Kubernetes Secret containing Vault configuration data in the argocd namespace of your ArgoCD host (Only available when used in ArgoCD) Error making API request. URL: PUT http://vault.vault.svc:8200/v1/auth/kubernetes/login Code: 400. Errors: * missing client token
 ```
 
 #### No vault plugin service account in openshift-gitops namesapce 
@@ -586,6 +589,9 @@ Unable to create application: application spec is invalid: InvalidSpecError: Una
 
 #### Error 500 : Namespace not authorized
 ```
-rpc error: code = Unknown desc = `argocd-vault-plugin generate ./` failed exit status 1: Error: Error making API request. URL: PUT http://172.30.231.227:8200/v1/auth/kubernetes/login Code: 500. Errors: * namespace not authorized Usage: argocd-vault-plugin generate <path> [flags] Flags: -c, --config-path string path to a file containing Vault configuration (YAML, JSON, envfile) to use -h, --help help for generate -s, --secret-name string name of a Kubernetes Secret containing Vault configuration data in the argocd namespace of your ArgoCD host (Only available when used in ArgoCD) Error making API request. URL: PUT http://172.30.231.227:8200/v1/auth/kubernetes/login Code: 500. Errors: * namespace not authorized
+rpc error: code = Unknown desc = `argocd-vault-plugin generate ./` failed exit status 1: Error: Error making API request. URL: PUT http://vault.vault.svc
+
+
+:8200/v1/auth/kubernetes/login Code: 500. Errors: * namespace not authorized Usage: argocd-vault-plugin generate <path> [flags] Flags: -c, --config-path string path to a file containing Vault configuration (YAML, JSON, envfile) to use -h, --help help for generate -s, --secret-name string name of a Kubernetes Secret containing Vault configuration data in the argocd namespace of your ArgoCD host (Only available when used in ArgoCD) Error making API request. URL: PUT http://vault.vault.svc:8200/v1/auth/kubernetes/login Code: 500. Errors: * namespace not authorized
 ```
 
