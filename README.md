@@ -1,11 +1,24 @@
 # Lab Vault
 
+Deploy a peristant vault
+
 ## Source documentations
 - https://cloud.redhat.com/blog/how-to-use-hashicorp-vault-and-argo-cd-for-gitops-on-openshift
+- https://blog.ramon-gordillo.dev/2021/03/gitops-with-argocd-and-hashicorp-vault-on-kubernetes/
 
+## Install vault cli
+```
+sudo yum install -y yum-utils
+sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo
+sudo yum -y install vault
+```
 
 ## Install Vault for dev
 ```
+oc delete project vault
+rm /tmp/output.txt
+rm /tmp/ca.txt
+
 oc new-project vault
 oc project vault
 
@@ -13,40 +26,57 @@ helm repo add hashicorp https://helm.releases.hashicorp.com
 
 oc adm policy add-scc-to-user privileged -z vault -n vault
 oc adm policy add-scc-to-user privileged -z vault-agent-injector -n vault
-helm install vault hashicorp/vault --set \ "global.openshift=true" --set "server.dev.enabled=true"
+
+helm install vault hashicorp/vault \
+  --namespace vault \
+  --set='global.openshift=true' \
+  --set ui.enabled=true
+
+oc expose svc/vault-ui
 
 watch oc get pod
 ```
 
+## Initialise vault
+```
+export VAULT_ADDR=http://$(oc get route vault-ui --template='{{ .spec.host }}')
+export VAULT_SKIP_VERIFY=true
+export OUTPUT=/tmp/output.txt
+
+vault operator init -n 1 -t 1 >> ${OUTPUT?}
+
+unseal=$(cat ${OUTPUT?} | grep "Unseal Key 1:" | sed -e "s/Unseal Key 1: //g")
+root=$(cat ${OUTPUT?} | grep "Initial Root Token:" | sed -e "s/Initial Root Token: //g")
+
+cat ${OUTPUT?}
+echo .
+echo Route : ${VAULT_ADDR}
+
+```
+
 ## Configure Vault
 ```
-oc -n vault rsh vault-0 
+vault operator unseal ${unseal?}
+vault login -no-print ${root?}
 
 vault auth enable kubernetes
 
+token_reviewer_jwt=$(kubectl get secrets -n vault -o jsonpath="{.items[?(@.metadata.annotations.kubernetes\.io/service-account\.name=='vault')].data.token}" |base64 -d)
+kubernetes_host=$(oc get service -n default kubernetes -o jsonpath="{.spec.clusterIP}")
+
+oc cp -n vault vault-0:/var/run/secrets/kubernetes.io/serviceaccount/..data/ca.crt /tmp/ca.crt
+
 vault write auth/kubernetes/config \
-    token_reviewer_jwt="$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)" \
-    kubernetes_host="https://$KUBERNETES_PORT_443_TCP_ADDR:443" \
-    kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-exit
-````
+   token_reviewer_jwt="${token_reviewer_jwt}" \
+   kubernetes_host=https://${kubernetes_host}:443 \
+   kubernetes_ca_cert=@/tmp/ca.crt
+```
 
 ## Add Secret to vault
 ```
-oc -n vault  rsh vault-0 
-
-vault kv put secret/vplugin/supersecret \
- username="user-from-vault" \
- password="pass-from-vault" \
- app-path="app-to-bootstrap" \
- app-name1=app-ex1 \
- app-name2=app-ex2
- 
-vault kv get secret/vplugin/supersecret
-
 vault policy write vplugin - <<EOF
-path "secret/data/vplugin/supersecret" {
-  capabilities = ["read"]
+path "vplugin/*" {
+    capabilities = ["read"]
 }
 EOF
 
@@ -54,12 +84,21 @@ vault write auth/kubernetes/role/vplugin \
     bound_service_account_names=vplugin \
     bound_service_account_namespaces=openshift-gitops \
     policies=vplugin \
-    ttl=2m
+    ttl=1h
 
 vault policy read vplugin
 vault read auth/kubernetes/role/vplugin 
 
-exit
+vault secrets enable -path vplugin -version=2 kv
+
+vault kv put vplugin/example/example-auth \
+ username="user-from-vault" \
+ password="pass-from-vault" \
+ app-path="app-to-bootstrap" \
+ app-name1=app-ex1 \
+ app-name2=app-ex2
+
+vault kv get vplugin/example/example-auth
 ```
 
 ## Install OpenShift GitOps
@@ -138,12 +177,37 @@ spec:
 oc rsh $(oc get pod -o name | grep openshift-gitops-repo-server-) ls /usr/local/bin
 ```
 
-
 ### Check Added plugin configuration to cm
 ```
 oc get cm  argocd-cm  -n openshift-gitops  -o yaml | more
 ```
 
+### Check Connection from argocd Repo Pod
+```
+oc -n openshift-gitops rsh $(oc get pod -o name | grep openshift-gitops-repo-server-)
+```
+
+#### Get token SA vplugin
+```
+OCP_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+curl -k --request POST --data '{"jwt": "'"$OCP_TOKEN"'", "role": "vplugin"}' http://vault.vault.svc:8200/v1/auth/kubernetes/login
+```
+Example of correct output
+```
+{"request_id":"1fb5bdac-7c72-46b5-23c9-3045cb948b44","lease_id":"","renewable":false,"lease_duration":0,"data":null,"wrap_info":null,"warnings":null,"auth":{"client_token":"s.rNLGuD9bMaxh6gOrgQgWtcAH","accessor":"zBTGFnN4dWYlMu9xbTuktFrO","policies":["default","vplugin"],"token_policies":["default","vplugin"],"metadata":{"role":"vplugin","service_account_name":"vplugin","service_account_namespace":"openshift-gitops","service_account_secret_name":"vplugin-token-wkpzw","service_account_uid":"d5886f2a-5f80-4214-b6c1-b240b3aec5cb"},"lease_duration":3600,"renewable":true,"entity_id":"5eba6062-885b-03d4-0525-fa51899b916d","token_type":"service","orphan":true}}
+```
+
+#### Get client_token from
+```
+X_VAULT_TOKEN="s.rNLGuD9bMaxh6gOrgQgWtcAH"
+
+curl -k --header "X-Vault-Token: $X_VAULT_TOKEN" http://vault.vault.svc:8200/v1/vplugin/data/example/example-auth
+```
+
+Example of correct output
+```
+{"request_id":"53362ea2-85a8-157e-ec86-66c59d8de4ac","lease_id":"","renewable":false,"lease_duration":0,"data":{"data":{"app-name1":"app-ex1","app-name2":"app-ex2","app-path":"app-to-bootstrap","password":"pass-from-vault","username":"user-from-vault"},"metadata":{"created_time":"2021-08-24T09:08:15.000352374Z","deletion_time":"","destroyed":false,"version":1}},"wrap_info":null,"warnings":null,"auth":null}
+```
 
 >>>>>>>>>>>>>>>>
 
@@ -217,7 +281,7 @@ cat << EOF | oc apply -f -
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: app-app-secret
+  name: app-app-secret-v2
   namespace: openshift-gitops
 spec:
   destination:
@@ -233,7 +297,7 @@ spec:
         - name: AVP_TYPE
           value: vault
         - name: AVP_VAULT_ADDR
-          value: 'http://172.30.231.227:8200'
+          value: 'http://vault.vault.svc:8200'
         - name: AVP_AUTH_TYPE
           value: k8s
       name: argocd-vault-plugin
@@ -251,9 +315,9 @@ kind: Secret
 apiVersion: v1
 metadata:
   namespace: vplugin-demo
-  name: example-secret-vault
+  name: example-secret-vault-v2
   annotations:
-    avp_path: "secret/data/vplugin/supersecret"
+    avp_path: "vplugin/data/example/example-auth"
 type: Opaque
 stringData:
   username: <username>
@@ -497,37 +561,26 @@ oc -n openshift-gitops logs $(oc get pod -o name | grep openshift-gitops-repo-se
 oc -n openshift-gitops rsh $(oc get pod -o name | grep openshift-gitops-repo-server-)
 ```
 
-#### Get vault cluster-IP for port 8200 for tests below
-
-Use the right endpoint to connect to vault
-
-```
-oc get service -n vault
-
-NAME                       TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)             AGE
-vault                      ClusterIP   172.30.231.227   <none>        8200/TCP,8201/TCP   38h
-```
-
 #### Get token SA vplugin
 ```
 OCP_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-curl -k --request POST --data '{"jwt": "'"$OCP_TOKEN"'", "role": "vplugin"}' http://172.30.231.227:8200/v1/auth/kubernetes/login
+curl -k --request POST --data '{"jwt": "'"$OCP_TOKEN"'", "role": "vplugin"}' http://vault.vault.svc:8200/v1/auth/kubernetes/login
 ```
 Example of correct output
 ```
-{"request_id":"ada5c976-2ed7-ccf0-2b51-782201c8287e","lease_id":"","renewable":false,"lease_duration":0,"data":null,"wrap_info":null,"warnings":null,"auth":{"client_token":"s.gVCbCRG0BcoZsp51plp4zikJ","accessor":"VYFdohSWZdmEBchyVslYPcx5","policies":["default","vplugin"],"token_policies":["default","vplugin"],"metadata":{"role":"vplugin","service_account_name":"vplugin","service_account_namespace":"openshift-gitops","service_account_secret_name":"vplugin-token-gvwln","service_account_uid":"e3de3959-1707-4474-83a1-1ba81fc0ae19"},"lease_duration":120,"renewable":true,"entity_id":"ba9ca5a9-fb99-4f40-99b5-6cfcc2bbfe00","token_type":"service","orphan":true}}
+{"request_id":"1fb5bdac-7c72-46b5-23c9-3045cb948b44","lease_id":"","renewable":false,"lease_duration":0,"data":null,"wrap_info":null,"warnings":null,"auth":{"client_token":"s.rNLGuD9bMaxh6gOrgQgWtcAH","accessor":"zBTGFnN4dWYlMu9xbTuktFrO","policies":["default","vplugin"],"token_policies":["default","vplugin"],"metadata":{"role":"vplugin","service_account_name":"vplugin","service_account_namespace":"openshift-gitops","service_account_secret_name":"vplugin-token-wkpzw","service_account_uid":"d5886f2a-5f80-4214-b6c1-b240b3aec5cb"},"lease_duration":3600,"renewable":true,"entity_id":"5eba6062-885b-03d4-0525-fa51899b916d","token_type":"service","orphan":true}}
 ```
 
 #### Get client_token from
 ```
-X_VAULT_TOKEN="s.gVCbCRG0BcoZsp51plp4zikJ"
+X_VAULT_TOKEN="s.rNLGuD9bMaxh6gOrgQgWtcAH"
 
-curl -k --header "X-Vault-Token: $X_VAULT_TOKEN" http://172.30.231.227:8200/v1/secret/data/vplugin/supersecret
+curl -k --header "X-Vault-Token: $X_VAULT_TOKEN" http://vault.vault.svc:8200/v1/vplugin/data/example/example-auth
 ```
 
 Example of correct output
 ```
-{"request_id":"a5be8dd9-9e1d-78c0-4c6c-4d9dba2586b6","lease_id":"","renewable":false,"lease_duration":0,"data":{"data":{"password":"pass-from-vault-v4","username":"user-from-vault-v4"},"metadata":{"created_time":"2021-08-18T16:21:46.703847125Z","deletion_time":"","destroyed":false,"version":4}},"wrap_info":null,"warnings":null,"auth":null}
+{"request_id":"53362ea2-85a8-157e-ec86-66c59d8de4ac","lease_id":"","renewable":false,"lease_duration":0,"data":{"data":{"app-name1":"app-ex1","app-name2":"app-ex2","app-path":"app-to-bootstrap","password":"pass-from-vault","username":"user-from-vault"},"metadata":{"created_time":"2021-08-24T09:08:15.000352374Z","deletion_time":"","destroyed":false,"version":1}},"wrap_info":null,"warnings":null,"auth":null}
 ```
 
 ### Error examples
