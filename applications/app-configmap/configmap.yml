@@ -5,7 +5,7 @@ metadata:
   namespace: vplugin-demo
   annotations:
     # avp_path: "secret/vplugin/supersecret"
-    avp_path: "secret/data/vplugin/supersecret"
+    avp_path: "vplugin/data/example/example-auth"
 data:
   example.property.1: <username>
   example.property.2: <password>
