@@ -132,6 +132,8 @@ spec:
         args: ["generate", "./"]
 ```
 
+## Check Instalation
+
 ### Check added plugin inside image
 
 ```
@@ -233,7 +235,7 @@ spec:
         - name: AVP_TYPE
           value: vault
         - name: AVP_VAULT_ADDR
-          value: 'http://172.30.231.227:8200'
+          value: 'http://vault.vault.svc:8200'
         - name: AVP_AUTH_TYPE
           value: k8s
       name: argocd-vault-plugin
@@ -285,7 +287,7 @@ spec:
         - name: AVP_TYPE
           value: vault
         - name: AVP_VAULT_ADDR
-          value: 'http://172.30.231.227:8200'
+          value: 'http://vault.vault.svc:8200'
         - name: AVP_AUTH_TYPE
           value: k8s
       name: argocd-vault-plugin
@@ -337,7 +339,7 @@ spec:
         - name: AVP_TYPE
           value: vault
         - name: AVP_VAULT_ADDR
-          value: 'http://172.30.231.227:8200'
+          value: 'http://vault.vault.svc:8200'
         - name: AVP_AUTH_TYPE
           value: k8s
       name: argocd-vault-plugin
@@ -511,7 +513,7 @@ vault                      ClusterIP   172.30.231.227   <none>        8200/TCP,8
 #### Get token SA vplugin
 ```
 OCP_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-curl -k --request POST --data '{"jwt": "'"$OCP_TOKEN"'", "role": "vplugin"}' http://172.30.231.227:8200/v1/auth/kubernetes/login
+curl -k --request POST --data '{"jwt": "'"$OCP_TOKEN"'", "role": "vplugin"}' http://vault.vault.svc:8200/v1/auth/kubernetes/login
 ```
 Example of correct output
 ```
@@ -522,7 +524,7 @@ Example of correct output
 ```
 X_VAULT_TOKEN="s.gVCbCRG0BcoZsp51plp4zikJ"
 
-curl -k --header "X-Vault-Token: $X_VAULT_TOKEN" http://172.30.231.227:8200/v1/secret/data/vplugin/supersecret
+curl -k --header "X-Vault-Token: $X_VAULT_TOKEN" http://vault.vault.svc:8200/v1/secret/data/vplugin/supersecret
 ```
 
 Example of correct output
