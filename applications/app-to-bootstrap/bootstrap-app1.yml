@@ -13,6 +13,6 @@ spec:
   source:
     path: applications/<app-name1>
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: vault-peristant
+    targetRevision: vault-persistant
   syncPolicy:
     automated: {}
