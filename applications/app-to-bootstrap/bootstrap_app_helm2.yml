@@ -4,7 +4,7 @@ metadata:
   name: boostrap-app-helm2
   namespace: openshift-gitops
   annotations:
-    avp_path: "secret/data/vplugin/supersecret"
+    avp_path: "vplugin/data/example/example-auth"
 spec:
   destination:
     namespace: vplugin-demo
@@ -23,6 +23,6 @@ spec:
           value: <password>
     path: applications/app-helm
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: HEAD
+    targetRevision: vault-persistant
   syncPolicy:
     automated: {}
