@@ -300,7 +300,7 @@ EOF
 ```
 
 This argocd application deploys a secret that containts annotation to path and un field used by vault-plugin
-- https://github.com/lcolagio/lab-vault-plugin/tree/master/applications/app-secret
+- https://github.com/lcolagio/lab-vault-plugin/blob/vault-persistant/applications/app-secret/secret.yml
 
 ```
 kind: Secret
@@ -352,7 +352,7 @@ EOF
 ```
 
 This argocd application deploys this configmap that containts annotation to path and un field used by vault-plugin
-- https://github.com/lcolagio/lab-vault-plugin/blob/master/applications/app-configmap/configmap.yml
+- https://github.com/lcolagio/lab-vault-plugin/blob/vault-persistant/applications/app-configmap/configmap.yml
 
 ```
 apiVersion: v1
@@ -404,10 +404,10 @@ EOF
 ```
 
 This argocd application app-to-bootstrap-with-vaultplugin bootstrap this applications that containts annotation to path and un field used by vault-plugin
-- https://github.com/lcolagio/lab-vault-plugin/blob/master/applications/app-to-bootstrap/bootstrap-app1.yml
-- https://github.com/lcolagio/lab-vault-plugin/blob/master/applications/app-to-bootstrap/bootstrap-app2.yml
-- https://github.com/lcolagio/lab-vault-plugin/blob/master/applications/app-to-bootstrap/bootstrap_app_helm1.yml 
-- https://github.com/lcolagio/lab-vault-plugin/blob/master/applications/app-to-bootstrap/bootstrap_app_helm2.yml 
+- https://github.com/lcolagio/lab-vault-plugin/blob/vault-persistant/applications/app-to-bootstrap/bootstrap-app1.yml
+- https://github.com/lcolagio/lab-vault-plugin/blob/vault-persistant/applications/app-to-bootstrap/bootstrap-app2.yml
+- https://github.com/lcolagio/lab-vault-plugin/blob/vault-persistant/applications/app-to-bootstrap/bootstrap_app_helm1.yml 
+- https://github.com/lcolagio/lab-vault-plugin/blob/vault-persistant/applications/app-to-bootstrap/bootstrap_app_helm2.yml 
 ```
 apiVersion: argoproj.io/v1alpha1
 kind: Application
