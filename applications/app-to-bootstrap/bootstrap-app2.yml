@@ -4,8 +4,7 @@ metadata:
   name: boostrap-app2
   namespace: openshift-gitops
   annotations:
-    # avp_path: "secret/vplugin/supersecret"
-    avp_path: "secret/data/vplugin/supersecret"
+    avp_path: "vplugin/data/example/example-auth"
 spec:
   destination:
     namespace: vplugin-demo
