@@ -182,7 +182,7 @@ oc rsh $(oc get pod -o name | grep openshift-gitops-repo-server-) ls /usr/local/
 oc get cm  argocd-cm  -n openshift-gitops  -o yaml | more
 ```
 
-### Check Connection from argocd Repo Pod
+### Check Connection from pod openshift-gitops-repo-server-xxx
 ```
 oc -n openshift-gitops rsh $(oc get pod -o name | grep openshift-gitops-repo-server-)
 ```
@@ -212,17 +212,6 @@ Example of correct output
 >>>>>>>>>>>>>>>>
 
 ## Test usecases
-
-### Get vault cluster-IP for port 8200 for tests below
-
-Use the right value for AVP_VAULT_ADDR used by vault plugin
-
-```
-oc get service -n vault
-
-NAME                       TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)             AGE
-vault                      ClusterIP   172.30.231.227   <none>        8200/TCP,8201/TCP   38h
-```
 
 ### Create vplugin-demo project with openshift-gitops-argocd-application rolebinding
 
@@ -302,7 +291,7 @@ spec:
           value: k8s
       name: argocd-vault-plugin
     repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: HEAD
+    targetRevision: vault-persistant
   syncPolicy: {}
 EOF
 ```
