@@ -13,7 +13,7 @@ sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashi
 sudo yum -y install vault
 ```
 
-## Install Vault for dev
+## Install Vault with peristant disque for dev
 ```
 oc delete project vault
 rm /tmp/output.txt
