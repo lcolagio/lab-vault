@@ -137,12 +137,14 @@ spec:
 ### Check added plugin inside image
 
 ```
+oc project openshift-gitops
 oc rsh $(oc get pod -o name | grep openshift-gitops-repo-server-) ls /usr/local/bin
 ```
 
 
 ### Check Added plugin configuration to cm
 ```
+oc project openshift-gitops
 oc get cm  argocd-cm  -n openshift-gitops  -o yaml | more
 ```
 
