@@ -24,9 +24,6 @@ oc project vault
 
 helm repo add hashicorp https://helm.releases.hashicorp.com
 
-oc adm policy add-scc-to-user privileged -z vault -n vault
-oc adm policy add-scc-to-user privileged -z vault-agent-injector -n vault
-
 helm install vault hashicorp/vault \
   --namespace vault \
   --set='global.openshift=true' \
