@@ -162,6 +162,17 @@ Example of correct output
 ```
 {"request_id":"1fb5bdac-7c72-46b5-23c9-3045cb948b44","lease_id":"","renewable":false,"lease_duration":0,"data":null,"wrap_info":null,"warnings":null,"auth":{"client_token":"s.rNLGuD9bMaxh6gOrgQgWtcAH","accessor":"zBTGFnN4dWYlMu9xbTuktFrO","policies":["default","vplugin"],"token_policies":["default","vplugin"],"metadata":{"role":"vplugin","service_account_name":"vplugin","service_account_namespace":"openshift-gitops","service_account_secret_name":"vplugin-token-wkpzw","service_account_uid":"d5886f2a-5f80-4214-b6c1-b240b3aec5cb"},"lease_duration":3600,"renewable":true,"entity_id":"5eba6062-885b-03d4-0525-fa51899b916d","token_type":"service","orphan":true}}
 ```
+In case of output error like
+```
+No such file or directory
+```
+Then delete the ArgoCD openshift-gitops kind and recreate it from the template below which contains all the previous changes.
+Then restart at step "Check connection vault from pod openshift-gitops-repo-server-xxx to vault"
+```
+oc project openshift-gitops
+oc delete argocd openshift-gitops
+oc apply -f https://raw.githubusercontent.com/lcolagio/lab-vault-plugin/master/openshift-gitops-conf/openshift-gitops.yml
+```
 
 #### Get client_token from
 ```
