@@ -141,11 +141,38 @@ oc project openshift-gitops
 oc rsh $(oc get pod -o name | grep openshift-gitops-repo-server-) ls /usr/local/bin
 ```
 
-
 ### Check Added plugin configuration to cm
 ```
 oc project openshift-gitops
 oc get cm  argocd-cm  -n openshift-gitops  -o yaml | more
+```
+
+### Check connection vault from pod openshift-gitops-repo-server-xxx to vault
+```
+oc project openshift-gitops
+oc rsh $(oc get pod -o name | grep openshift-gitops-repo-server-)
+```
+
+#### Get token SA vplugin
+```
+OCP_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+curl -k --request POST --data '{"jwt": "'"$OCP_TOKEN"'", "role": "vplugin"}' http://vault.vault.svc:8200/v1/auth/kubernetes/login
+```
+Example of correct output
+```
+{"request_id":"1fb5bdac-7c72-46b5-23c9-3045cb948b44","lease_id":"","renewable":false,"lease_duration":0,"data":null,"wrap_info":null,"warnings":null,"auth":{"client_token":"s.rNLGuD9bMaxh6gOrgQgWtcAH","accessor":"zBTGFnN4dWYlMu9xbTuktFrO","policies":["default","vplugin"],"token_policies":["default","vplugin"],"metadata":{"role":"vplugin","service_account_name":"vplugin","service_account_namespace":"openshift-gitops","service_account_secret_name":"vplugin-token-wkpzw","service_account_uid":"d5886f2a-5f80-4214-b6c1-b240b3aec5cb"},"lease_duration":3600,"renewable":true,"entity_id":"5eba6062-885b-03d4-0525-fa51899b916d","token_type":"service","orphan":true}}
+```
+
+#### Get client_token from
+```
+X_VAULT_TOKEN="s.rNLGuD9bMaxh6gOrgQgWtcAH"
+
+curl -k --header "X-Vault-Token: $X_VAULT_TOKEN" http://vault.vault.svc:8200/v1/vplugin/data/example/example-auth
+```
+
+Example of correct output
+```
+{"request_id":"53362ea2-85a8-157e-ec86-66c59d8de4ac","lease_id":"","renewable":false,"lease_duration":0,"data":{"data":{"app-name1":"app-ex1","app-name2":"app-ex2","app-path":"app-to-bootstrap","password":"pass-from-vault","username":"user-from-vault"},"metadata":{"created_time":"2021-08-24T09:08:15.000352374Z","deletion_time":"","destroyed":false,"version":1}},"wrap_info":null,"warnings":null,"auth":null}
 ```
 
 
