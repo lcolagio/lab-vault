@@ -153,16 +153,6 @@ oc get cm  argocd-cm  -n openshift-gitops  -o yaml | more
 
 ## Test usecases
 
-### Get vault cluster-IP for port 8200 for tests below
-
-Use the right value for AVP_VAULT_ADDR used by vault plugin
-
-```
-oc get service -n vault
-
-NAME                       TYPE        CLUSTER-IP       EXTERNAL-IP   PORT(S)             AGE
-vault                      ClusterIP   172.30.231.227   <none>        8200/TCP,8201/TCP   38h
-```
 
 ### Create vplugin-demo project with openshift-gitops-argocd-application rolebinding
 
