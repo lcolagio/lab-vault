@@ -1,4 +1,4 @@
-# Lab Vault
+# Lab ArgoCD Vault plugin
 
 ## Source documentations
 - https://cloud.redhat.com/blog/how-to-use-hashicorp-vault-and-argo-cd-for-gitops-on-openshift
