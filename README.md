@@ -18,7 +18,7 @@ helm install vault hashicorp/vault \
 watch oc get pod
 ```
 
-## Configure Vault
+## Configure Vault authentification
 ```
 oc -n vault rsh vault-0 
 
