@@ -1,6 +1,7 @@
-# Lab Vault
+# Lab Vault OpenShift Gitops 1.3.1 et vault plugin 1.5.0
+Date 30/11/2022
 
-Deploy a peristant vault
+OCP 4.7 / 4.8.19
 
 ## Source documentations
 - https://cloud.redhat.com/blog/how-to-use-hashicorp-vault-and-argo-cd-for-gitops-on-openshift
@@ -204,7 +205,7 @@ oc get cm argocd-cm -o yaml | grep configManagementPlugins -A4
 
 
 
-## Test de login er trequêty au vault depuis argocd pod 
+## Test de login et requête au vault depuis argocd pod 
 
 ```
 # se connecter en rsh au pod openshift-gitops-repo-server
@@ -218,17 +219,137 @@ curl -k --request POST --data '{"jwt": "'"$OCP_TOKEN"'", "role": "vplugin"}' htt
 ```
 
 ```
-X_VAULT_TOKEN="s.gVCbCRG0BcoZsp51plp4zikJ"
+X_VAULT_TOKEN="s.BsRGmx78yJMCFwm9MLphqokn"
 curl -k --header "X-Vault-Token: $X_VAULT_TOKEN" http://vault.vault.svc:8200/v1/secret/data/vplugin/supersecret
 {"request_id":"40c7e00b-78bf-5f21-bf7f-9681c9860519","lease_id":"","renewable":false,"lease_duration":0,"data":{"data":{"app-name1":"app-ex1","app-name2":"app-ex2","app-path":"app-to-bootstrap","password":"pass-from-vault","username":"user-from-vault"},"metadata":{"created_time":"2021-11-30T15:48:32.948978911Z","custom_metadata":null,"deletion_time":"","destroyed":false,"version":1}},"wrap_info":null,"warnings":null,"auth":null}
 ```
 
 
+## Demo d'une Application argocd
+
+```
+# creation d'un projet sde demo vplugin-demo et ajout des droits à l'instance Argocd localisée dans openshift-gitops pour deployer dans ce projet vplugin-demo.
+
+oc new-project vplugin-demo
+
+cat << EOF | oc apply -f -
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: vplugin-demo-role-binding
+  namespace: vplugin-demo
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: admin
+subjects:
+- kind: ServiceAccount
+  name: openshift-gitops-argocd-application-controller
+  namespace: openshift-gitops
+EOF
+```
+
+```
+# Depploiement de l'application demo qui deploy un secret
+
+oc delete application app-app-secret -n openshift-gitops
+
+cat << EOF | oc apply -f -
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: app-app-secret
+  namespace: openshift-gitops
+spec:
+  destination:
+    namespace: vplugin-demo
+    server: 'https://kubernetes.default.svc'
+  project: default
+  source:
+    path: applications/app-secret
+    plugin:
+      env:
+        - name: AVP_AUTH_TYPE 
+          value: k8s 
+        - name: AVP_K8S_ROLE
+          value: vplugin
+        - name: AVP_TYPE
+          value: vault
+        - name: VAULT_ADDR
+          value: 'http://vault.vault.svc:8200'
+        - name: AVP_AUTH_TYPE
+          value: k8s    
+        - name: AVP_K8S_MOUNT_PATH 
+          value: auth/kubernetes
+      name: argocd-vault-plugin
+    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
+    targetRevision: HEAD
+  syncPolicy: {}
+EOF
+```
+
+```
+# L'application argocd deploie ce secret qui fera une requête vault en kv version 2 par default
+## See paramether option https://ibm.github.io/argocd-vault-plugin/v1.5.0
+
+kind: Secret
+apiVersion: v1
+metadata:
+  namespace: vplugin-demo
+  name: example-secret-vault
+  annotations:
+    avp.kubernetes.io/path: "secret/data/vplugin/supersecret"
+type: Opaque
+stringData:
+  username: <username>
+  password: <password>
+```
+
+## Remarques
+
+```
+# Les paramètres par default peuvent être mis dans l'instance ArgoCD 
+## See paramether option https://ibm.github.io/argocd-vault-plugin/v1.5.0
+
+kind: argocd
+...
+  repo: 
+    env: 
+      - name: VAULT_ADDR 
+        value: 'https://vault-pki.dev.net.intra.laposte.fr' 
+      - name: VAULT_CACERT 
+        value: /app/config/tls/ca-bundle.crt 
+      - name: AVP_AUTH_TYPE 
+        value: k8s 
+      - name: AVP_K8S_ROLE 
+        value: vplugin 
+      - name: AVP_K8S_MOUNT_PATH 
+        value: auth/kube-openshift-1207 
+      - name: AVP_TYPE 
+        value: vault 
+
+  configManagementPlugins: |- 
+    - name: argocd-vault-plugin 
+      generate: 
+        command: ["argocd-vault-plugin"] 
+        args: ["generate", "./"] 
+
+    - name: argocd-vault-plugin-helm 
+      init: 
+        command: [sh, -c] 
+        args: ["helm dependency build"] 
+      generate: 
+        command: ["sh", "-c"] 
+        args: ["helm template $ARGOCD_APP_NAME ${helm_args} . | argocd-vault-plugin generate -"] 
+```
+
+     
 ## Annexes
 
 ```
+oc delete project vault
 oc delete ImageStream argocd-vault-plugin -n ${ARGOCD_VAULT_PLUGIN_NAMESPACE}
 oc delete BuildConfig argocd-vault-plugin -n ${ARGOCD_VAULT_PLUGIN_NAMESPACE}
-
 ```
+
 
