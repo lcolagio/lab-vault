@@ -229,5 +229,6 @@ curl -k --header "X-Vault-Token: $X_VAULT_TOKEN" http://vault.vault.svc:8200/v1/
 ```
 oc delete ImageStream argocd-vault-plugin -n ${ARGOCD_VAULT_PLUGIN_NAMESPACE}
 oc delete BuildConfig argocd-vault-plugin -n ${ARGOCD_VAULT_PLUGIN_NAMESPACE}
+
 ```
 
