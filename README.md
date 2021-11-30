@@ -5,162 +5,186 @@ Deploy a peristant vault
 ## Source documentations
 - https://cloud.redhat.com/blog/how-to-use-hashicorp-vault-and-argo-cd-for-gitops-on-openshift
 - https://blog.ramon-gordillo.dev/2021/03/gitops-with-argocd-and-hashicorp-vault-on-kubernetes/
+- https://wiki.net.extra.laposte.fr/confluence/pages/resumedraft.action?draftId=820811087&draftShareId=289e0ca5-e331-42a1-a8f5-a4eee9abfe77&
+- https://github.com/IBM/argocd-vault-plugin/blob/main/docs/installation.md
 
-## Install vault cli
+## Build Image argocdrepo with plug-in vault
+
 ```
-sudo yum install -y yum-utils
-sudo yum-config-manager --add-repo https://rpm.releases.hashicorp.com/RHEL/hashicorp.repo
-sudo yum -y install vault
+# Creer une image stream qui contiendra le build de l'image argocd-vault-plugin
+ARGOCD_VAULT_PLUGIN_NAMESPACE=openshift-gitops
+
+oc apply -f - <<EOF
+apiVersion: image.openshift.io/v1
+kind: ImageStream
+metadata:
+  labels:
+    app: argocd-vault-plugin
+  name: argocd-vault-plugin
+  namespace: ${ARGOCD_VAULT_PLUGIN_NAMESPACE}
+EOF
 ```
 
-## Install Vault with peristant disque for dev
 ```
-oc delete project vault
-rm /tmp/output.txt
-rm /tmp/ca.txt
+# Rechercher l'image ArgoCD repo utilsée par  L'opérateur OpenShift Gitops
+# Ajouter manuellement le docker from dans le buidconfig
+oc get ClusterServiceVersion openshift-gitops-operator.v1.3.1 -o yaml | grep ARGOCD_REPOSERVER_IMAGE  -A1
 
+# ARGOCD_REPO_SOURCE_IMAGE=registry.redhat.io/openshift-gitops-1/argocd-rhel8@sha256:6087f905ccb8192fd640109694ba836ae87d107234a157b98723f175ce14c97d
+ARGOCD_VAULT_PLUGIN_NAMESPACE=openshift-gitops
+ARGOCD_REPO_SOURCE_IMAGE=registry.redhat.io/openshift-gitops-1/argocd-rhel8:v1.3.1
+
+# Build Config
+oc apply -f - <<EOF
+apiVersion: build.openshift.io/v1
+kind: BuildConfig
+metadata:
+  labels:
+    app: argocd-vault-plugin
+  name: argocd-vault-plugin
+  namespace: ${ARGOCD_VAULT_PLUGIN_NAMESPACE}
+spec:
+  output:
+    to:
+      kind: ImageStreamTag
+      name: argocd-vault-plugin:131-150
+  source:
+    type: Dockerfile
+    dockerfile: |
+      FROM ${ARGOCD_REPO_SOURCE_IMAGE}
+      USER root
+      RUN curl -L -o /usr/local/bin/argocd-vault-plugin https://github.com/IBM/argocd-vault-plugin/releases/download/v1.5.0/argocd-vault-plugin_1.5.0_linux_amd64
+      RUN chmod +x /usr/local/bin/argocd-vault-plugin
+      USER argocd
+  strategy:
+    dockerStrategy:
+      buildArgs:
+      # - name: "NO_PROXY"
+      #   value: "localhost,127.0.0.0,127.0.0.1,127.0.0.2,localaddress,.localdomain.com,.laposte.fr"
+    type: Docker
+EOF
+
+oc start-build argocd-vault-plugin -n ${ARGOCD_VAULT_PLUGIN_NAMESPACE}
+```
+
+## Ajout d'une instance Vault de dev
+
+```
+# Creer une instance vault
 oc new-project vault
 oc project vault
 
 helm repo add hashicorp https://helm.releases.hashicorp.com
 
-helm install vault hashicorp/vault \
-  --namespace vault \
-  --set='global.openshift=true' \
-  --set ui.enabled=true
-
-oc expose svc/vault-ui
+helm install vault hashicorp/vault --set "global.openshift=true" --set "server.dev.enabled=true"
 
 watch oc get pod
 ```
 
-## Initialise vault
 ```
-export VAULT_ADDR=http://$(oc get route vault-ui --template='{{ .spec.host }}')
-export VAULT_SKIP_VERIFY=true
-export OUTPUT=/tmp/output.txt
+# Créer un serviceaccount qui sera utilisé par le vault pour s'assurer de la validité des tokens des services accounts
 
-vault operator init -n 1 -t 1 >> ${OUTPUT?}
+oc create serviceaccount vault-auth -n default
 
-unseal=$(cat ${OUTPUT?} | grep "Unseal Key 1:" | sed -e "s/Unseal Key 1: //g")
-root=$(cat ${OUTPUT?} | grep "Initial Root Token:" | sed -e "s/Initial Root Token: //g")
-
-cat ${OUTPUT?}
-echo .
-echo Route : ${VAULT_ADDR}
-
+oc apply -f - <<EOF
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: vault-auth-tokenreview
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+- kind: ServiceAccount
+  name: vault-auth
+  namespace: default
+EOF
 ```
 
-## Configure Vault
+
 ```
-vault operator unseal ${unseal?}
-vault login -no-print ${root?}
+# Récupérer le token du compte de service vault-auth
+token_reviewer_jwt="$(oc serviceaccounts get-token vault-auth -n default)" 
+echo $token_reviewer_jwt
+```
+
+```
+# Ajouter manuellement le token dans token_reviewer_jwt=
 
 vault auth enable kubernetes
 
-token_reviewer_jwt=$(kubectl get secrets -n vault -o jsonpath="{.items[?(@.metadata.annotations.kubernetes\.io/service-account\.name=='vault')].data.token}" |base64 -d)
-kubernetes_host=$(oc get service -n default kubernetes -o jsonpath="{.spec.clusterIP}")
-
-oc cp -n vault vault-0:/var/run/secrets/kubernetes.io/serviceaccount/..data/ca.crt /tmp/ca.crt
-
 vault write auth/kubernetes/config \
-   token_reviewer_jwt="${token_reviewer_jwt}" \
-   kubernetes_host=https://${kubernetes_host}:443 \
-   kubernetes_ca_cert=@/tmp/ca.crt
+    token_reviewer_jwt="eyJhbGciOiJSUzI1NiIsImtpZCI6ImlyaUNPQ21CeEVzSDE0U2xZRDYtSE5hdTV3cGM3R09EMVlwR3EwNHVqbmcifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJkZWZhdWx0Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6InZhdWx0LWF1dGgtdG9rZW4taHp4dG0iLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoidmF1bHQtYXV0aCIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6IjVjMWI1ZDM4LWI1MjktNDY4OC05ZWYwLWZmZThlMTlmYjcwOSIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDpkZWZhdWx0OnZhdWx0LWF1dGgifQ.mxfaTTOuFTKSBcSRaxACMdsyzl4_0N86XVafJTz2yO3GTTTHdC6dsgRhL5dO7I2pcU-pmq-zHJKgQV7hj3WAdpvh0qCkIsIghksRyvr7CqWBEjtQp5f9ehtP2JAdatKL1zLMktWKGFFP6OQivAPR9ZfPYwjZdwtJaQA5-9OabH7rFA2jXXbCBLmuomDdR5sehs1bSjhsLf1Ly8TH2-mjfgEuKbPMcQxqf_BnWro1dR2JsURYegNBsPNScI_GA6i91h4qb23ymdpddHRnZ2DT9pU5LrmLJHxAYA87N__kn0F5IkI6iD7D94b7dLTpDMLcLKtQO8Tep1DcxU3Avnsf5LeqDOAAeRoogTbrK4nu5we0aNYF9mSZ743MWqVq1ljmE3K07kfYFRQnOB0N8jgEV6NNdydPDBojYbHDMEbX_te62pbeaoWrf8xKTBCnE3rTxzVai004VyDtUy0e2UOYXXF0GCAxGEixKfqkyHzpNIP_GYvLIZs5Tcr3aJsc0NC2_iu24WeIAt1lm8GXPbDFeLSDm9OKYMjbmwGqzXwLqANyW66JbzLUIkDSbqCeh8gFsRHLY4if4eXvn8fjVRTUhCzBeuH94yFiK8J-QXWZwpzu2-qbzC99Lh-etcOQQXGJm6ZVar5A5aY_y6y3mZcvicFbyOF0b_yKmp9-g6-mRdc" \
+    kubernetes_host="https://$KUBERNETES_PORT_443_TCP_ADDR:443" \
+    kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+
+exit
 ```
 
-## Add Secret to vault
 ```
-vault policy write vplugin - <<EOF
-path "vplugin/*" {
-    capabilities = ["read"]
-}
-EOF
+# exemple de configuration si plusieurs instance kubernetes dans le même vault (si le vault est externe)
+vault auth enable --path="kube-openshift-1207" kubernetes
 
-vault write auth/kubernetes/role/vplugin \
-    bound_service_account_names=vplugin \
-    bound_service_account_namespaces=openshift-gitops \
-    policies=vplugin \
-    ttl=1h
+vault write auth/kube-openshift-1207/config \
+    token_reviewer_jwt="eyJhbGciOiJSUzI1NiIsImtpZCI6ImlyaUNPQ21CeEVzSDE0U2xZRDYtSE5hdTV3cGM3R09EMVlwR3EwNHVqbmcifQ.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJkZWZhdWx0Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9zZWNyZXQubmFtZSI6InZhdWx0LWF1dGgtdG9rZW4taHp4dG0iLCJrdWJlcm5ldGVzLmlvL3NlcnZpY2VhY2NvdW50L3NlcnZpY2UtYWNjb3VudC5uYW1lIjoidmF1bHQtYXV0aCIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6IjVjMWI1ZDM4LWI1MjktNDY4OC05ZWYwLWZmZThlMTlmYjcwOSIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDpkZWZhdWx0OnZhdWx0LWF1dGgifQ.mxfaTTOuFTKSBcSRaxACMdsyzl4_0N86XVafJTz2yO3GTTTHdC6dsgRhL5dO7I2pcU-pmq-zHJKgQV7hj3WAdpvh0qCkIsIghksRyvr7CqWBEjtQp5f9ehtP2JAdatKL1zLMktWKGFFP6OQivAPR9ZfPYwjZdwtJaQA5-9OabH7rFA2jXXbCBLmuomDdR5sehs1bSjhsLf1Ly8TH2-mjfgEuKbPMcQxqf_BnWro1dR2JsURYegNBsPNScI_GA6i91h4qb23ymdpddHRnZ2DT9pU5LrmLJHxAYA87N__kn0F5IkI6iD7D94b7dLTpDMLcLKtQO8Tep1DcxU3Avnsf5LeqDOAAeRoogTbrK4nu5we0aNYF9mSZ743MWqVq1ljmE3K07kfYFRQnOB0N8jgEV6NNdydPDBojYbHDMEbX_te62pbeaoWrf8xKTBCnE3rTxzVai004VyDtUy0e2UOYXXF0GCAxGEixKfqkyHzpNIP_GYvLIZs5Tcr3aJsc0NC2_iu24WeIAt1lm8GXPbDFeLSDm9OKYMjbmwGqzXwLqANyW66JbzLUIkDSbqCeh8gFsRHLY4if4eXvn8fjVRTUhCzBeuH94yFiK8J-QXWZwpzu2-qbzC99Lh-etcOQQXGJm6ZVar5A5aY_y6y3mZcvicFbyOF0b_yKmp9-g6-mRdc" \
+    kubernetes_host="https://api-paas-03.test.net.intra.laposte.fr:6443" \
+    kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+exit
+```
 
-vault policy read vplugin
-vault read auth/kubernetes/role/vplugin 
 
-vault secrets enable -path vplugin -version=2 kv
+## Ajout d'un jeux de test
 
-vault kv put vplugin/example/example-auth \
+```
+# Ajout de secrets dans vault 
+
+oc -n vault  rsh vault-0
+
+vault kv put secret/vplugin/supersecret \
  username="user-from-vault" \
  password="pass-from-vault" \
  app-path="app-to-bootstrap" \
  app-name1=app-ex1 \
  app-name2=app-ex2
+  
+vault kv get secret/vplugin/supersecret  
 
-vault kv get vplugin/example/example-auth
-```
-
-## Install OpenShift GitOps
-
-- https://github.com/redhat-developer/openshift-gitops-getting-started
-
-### Add a service account for vault plugin
-
-```
-oc project openshift-gitops
-
-cat << EOF | oc apply -f -
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: vplugin
+vault policy write vplugin - <<EOF
+path "secret/data/vplugin/supersecret" {
+  capabilities = ["read"]
+}
 EOF
+
+vault write auth/kubernetes/role/vplugin \
+  bound_service_account_names=argocd-vault-plugin \
+  bound_service_account_namespaces=openshift-gitops \
+  policies=vplugin \
+  ttl=1h
+
+vault policy read vplugin
+vault read auth/kubernetes/role/vplugin
 ```
 
-### Edit CR subscription "openshift-gitops-operator"
-```
-oc edit subscription openshift-gitops-operator -n openshift-operators
-```
+
+
+## Configurer ArgoCD avec le plugin vault
 
 ```
-spec:
-  config:
-    env:
-      - name: DISABLE_DEX
-        value: 'false'
-```
-
-### Edit CR argocd "openshift-gitops"
-
-example: https://github.com/lcolagio/lab-vault-plugin/blob/master/openshift-gitops-conf/openshift-gitops.yml 
-
-```
-oc edit argocd openshift-gitops -n openshift-gitops
+# Ajouter un compte de service associer au plugin vault 
+ARGOCD_VAULT_PLUGIN_NAMESPACE=openshift-gitops
+oc create serviceaccount argocd-vault-plugin -n ${ARGOCD_VAULT_PLUGIN_NAMESPACE}
 ```
 
 ```
 spec:
-
-# Add Dex
-
-  dex:
-    openShiftOAuth: true
-
-# Add Rbac
-
-  rbac:
-    defaultPolicy: 'role:readonly'
-    policy: 'g, ADMIN, role:admin'
-    scopes: '[groups]'
-
 # Add rebuilded image with plugin vault
-
   repo:
-    image: quay.io/pbmoses/pmo-argovault
+    image: image-registry.openshift-image-registry.svc:5000/openshift-gitops/argocd-vault-plugin
     mountsatoken: true
-    serviceaccount: vplugin
-    version: v1.2
-
+    serviceaccount: argocd-vault-plugin
+    version: 131-150
 # Add Plugin vault configuration
-
   configManagementPlugins: |-
     - name: argocd-vault-plugin
       generate:
@@ -168,438 +192,42 @@ spec:
         args: ["generate", "./"]
 ```
 
-## Check Installation
-
-### Check added plugin inside image
 
 ```
-oc rsh $(oc get pod -o name | grep openshift-gitops-repo-server-) ls /usr/local/bin
+# Vérifier la présence du plugin
+oc project ${ARGOCD_VAULT_PLUGIN_NAMESPACE} 
+oc rsh $(oc get pod -o name | grep openshift-gitops-repo-server-) ls /usr/local/bin/argocd-vault-plugin
+
+# Vérification de la configuration du plugin ajouté dans la configmap
+oc get cm argocd-cm -o yaml | grep configManagementPlugins -A4
 ```
 
-### Check Added plugin configuration to cm
-```
-oc get cm  argocd-cm  -n openshift-gitops  -o yaml | more
-```
 
-### Check connection vault from pod openshift-gitops-repo-server-xxx to vault
-```
-oc project openshift-gitops
-oc rsh $(oc get pod -o name | grep openshift-gitops-repo-server-)
-```
 
-#### Get token SA vplugin
+## Test de login er trequêty au vault depuis argocd pod 
+
 ```
+# se connecter en rsh au pod openshift-gitops-repo-server
+ARGOCD_VAULT_PLUGIN_NAMESPACE=openshift-gitops
+oc -n ${ARGOCD_VAULT_PLUGIN_NAMESPACE} rsh $(oc get pod -o name | grep repo-server)
+
 OCP_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
 curl -k --request POST --data '{"jwt": "'"$OCP_TOKEN"'", "role": "vplugin"}' http://vault.vault.svc:8200/v1/auth/kubernetes/login
-```
-Example of correct output
-```
-{"request_id":"1fb5bdac-7c72-46b5-23c9-3045cb948b44","lease_id":"","renewable":false,"lease_duration":0,"data":null,"wrap_info":null,"warnings":null,"auth":{"client_token":"s.rNLGuD9bMaxh6gOrgQgWtcAH","accessor":"zBTGFnN4dWYlMu9xbTuktFrO","policies":["default","vplugin"],"token_policies":["default","vplugin"],"metadata":{"role":"vplugin","service_account_name":"vplugin","service_account_namespace":"openshift-gitops","service_account_secret_name":"vplugin-token-wkpzw","service_account_uid":"d5886f2a-5f80-4214-b6c1-b240b3aec5cb"},"lease_duration":3600,"renewable":true,"entity_id":"5eba6062-885b-03d4-0525-fa51899b916d","token_type":"service","orphan":true}}
-```
-In case of output error like
-```
-No such file or directory
-```
-Then delete the ArgoCD openshift-gitops kind and recreate it from the template below which contains all the previous changes.
-Then restart at step "Check connection vault from pod openshift-gitops-repo-server-xxx to vault"
-```
-oc project openshift-gitops
-oc delete argocd openshift-gitops
-oc apply -f https://raw.githubusercontent.com/lcolagio/lab-vault-plugin/master/openshift-gitops-conf/openshift-gitops.yml
-```
 
-#### Get client_token from
-```
-X_VAULT_TOKEN="s.rNLGuD9bMaxh6gOrgQgWtcAH"
-
-curl -k --header "X-Vault-Token: $X_VAULT_TOKEN" http://vault.vault.svc:8200/v1/vplugin/data/example/example-auth
-```
-
-Example of correct output
-```
-{"request_id":"53362ea2-85a8-157e-ec86-66c59d8de4ac","lease_id":"","renewable":false,"lease_duration":0,"data":{"data":{"app-name1":"app-ex1","app-name2":"app-ex2","app-path":"app-to-bootstrap","password":"pass-from-vault","username":"user-from-vault"},"metadata":{"created_time":"2021-08-24T09:08:15.000352374Z","deletion_time":"","destroyed":false,"version":1}},"wrap_info":null,"warnings":null,"auth":null}
-```
-
->>>>>>>>>>>>>>>>
-
-## Test usecases
-
-### Create vplugin-demo project with openshift-gitops-argocd-application rolebinding
-
-```
-oc new-project vplugin-demo
-
-cat << EOF | oc apply -f -
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: vplugin-demo-role-binding
-  namespace: vplugin-demo
-roleRef:
-  apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
-  name: admin
-subjects:
-- kind: ServiceAccount
-  name: openshift-gitops-argocd-application-controller
-  namespace: openshift-gitops
-EOF
-```
-
-### 1 - Test argocd deployment whitout vault plugin
-
-Just to test argocd without vault plugin
-
-```
-oc delete application app-test-argocd -n openshift-gitops
-
-cat << EOF | oc apply -f -
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: app-test-argocd
-  namespace: openshift-gitops
-spec:
-  destination:
-    name: ''
-    namespace: vplugin-demo
-    server: 'https://kubernetes.default.svc'
-  source:
-    path: applications/app-test-argocd
-    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: vault-persistant
-  project: default
-EOF
-```
-
-### 2 - Test secret with vault plugin
-
-```
-oc delete application app-app-secret -n openshift-gitops
-
-cat << EOF | oc apply -f -
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: app-app-secret-v2
-  namespace: openshift-gitops
-spec:
-  destination:
-    namespace: vplugin-demo
-    server: 'https://kubernetes.default.svc'
-  project: default
-  source:
-    path: applications/app-secret
-    plugin:
-      env:
-        - name: AVP_K8S_ROLE
-          value: vplugin
-        - name: AVP_TYPE
-          value: vault
-        - name: AVP_VAULT_ADDR
-          value: 'http://vault.vault.svc:8200'
-        - name: AVP_AUTH_TYPE
-          value: k8s
-      name: argocd-vault-plugin
-    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: vault-persistant
-  syncPolicy: {}
-EOF
-```
-
-This argocd application deploys a secret that containts annotation to path and un field used by vault-plugin
-- https://github.com/lcolagio/lab-vault-plugin/blob/vault-persistant/applications/app-secret/secret.yml
-
-```
-kind: Secret
-apiVersion: v1
-metadata:
-  namespace: vplugin-demo
-  name: example-secret-vault-v2
-  annotations:
-    avp_path: "vplugin/data/example/example-auth"
-type: Opaque
-stringData:
-  username: <username>
-  password: <password>
-``` 
-
-### 3 - Test configmap with vault plugin
-
-```
-oc delete application app-configmap -n openshift-gitops
-
-cat << EOF | oc apply -f -
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: app-configmap
-  namespace: openshift-gitops
-spec:
-  destination:
-    namespace: vplugin-demo
-    server: 'https://kubernetes.default.svc'
-  project: default
-  source:
-    path: applications/app-configmap
-    plugin:
-      env:
-        - name: AVP_K8S_ROLE
-          value: vplugin
-        - name: AVP_TYPE
-          value: vault
-        - name: AVP_VAULT_ADDR
-          value: 'http:/vault.vault.svc:8200'
-        - name: AVP_AUTH_TYPE
-          value: k8s
-      name: argocd-vault-plugin
-    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: vault-persistant
-  syncPolicy: {}
-EOF
-```
-
-This argocd application deploys this configmap that containts annotation to path and un field used by vault-plugin
-- https://github.com/lcolagio/lab-vault-plugin/blob/vault-persistant/applications/app-configmap/configmap.yml
-
-```
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: example-configmap-vault
-  namespace: vplugin-demo
-  annotations:
-    
-    avp_path: "secret/data/vplugin/supersecret"
-data:
-  example.property.1: <username>
-  example.property.2: <password>
-```
-
-### 4 - Test to bootstrap application argocd 
-
-```
-oc delete application app-to-bootstrap -n openshift-gitops
-
-cat << EOF | oc apply -f -
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: app-to-bootstrap-with-vaultplugin
-  namespace: openshift-gitops
-spec:
-  destination:
-    namespace: vplugin-demo
-    server: 'https://kubernetes.default.svc'
-  project: default
-  source:
-    path: applications/app-to-bootstrap
-    plugin:
-      env:
-        - name: AVP_K8S_ROLE
-          value: vplugin
-        - name: AVP_TYPE
-          value: vault
-        - name: AVP_VAULT_ADDR
-          value: 'http://vault.vault.svc:8200'
-        - name: AVP_AUTH_TYPE
-          value: k8s
-      name: argocd-vault-plugin
-    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: vault-persistant
-  syncPolicy: {}
-EOF
-```
-
-This argocd application app-to-bootstrap-with-vaultplugin bootstrap this applications that containts annotation to path and un field used by vault-plugin
-- https://github.com/lcolagio/lab-vault-plugin/blob/vault-persistant/applications/app-to-bootstrap/bootstrap-app1.yml
-- https://github.com/lcolagio/lab-vault-plugin/blob/vault-persistant/applications/app-to-bootstrap/bootstrap-app2.yml
-- https://github.com/lcolagio/lab-vault-plugin/blob/vault-persistant/applications/app-to-bootstrap/bootstrap_app_helm1.yml 
-- https://github.com/lcolagio/lab-vault-plugin/blob/vault-persistant/applications/app-to-bootstrap/bootstrap_app_helm2.yml 
-```
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: boostrap-app1
-  namespace: openshift-gitops
-  annotations: 
-    avp_path: "secret/data/vplugin/supersecret"
-spec:
-  destination:
-    namespace: vplugin-demo
-    server: 'https://kubernetes.default.svc'
-  project: default
-  source:
-    path: applications/<app-name1>
-    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: vault-persistant
-  syncPolicy:
-    automated: {}
+{"request_id":"ada5c976-2ed7-ccf0-2b51-782201c8287e","lease_id":"","renewable":false,"lease_duration":0,"data":null,"wrap_info":null,"warnings":null,"auth":{"client_token":"s.gVCbCRG0BcoZsp51plp4zikJ","accessor":"VYFdohSWZdmEBchyVslYPcx5","policies":["default","vplugin"],"token_policies":["default","vplugin"],"metadata":{"role":"vplugin","service_account_name":"vplugin","service_account_namespace":"openshift-gitops","service_account_secret_name":"vplugin-token-gvwln","service_account_uid":"e3de3959-1707-4474-83a1-1ba81fc0ae19"},"lease_duration":120,"renewable":true,"entity_id":"ba9ca5a9-fb99-4f40-99b5-6cfcc2bbfe00","token_type":"service","orphan":true}}
 ```
 
 ```
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: boostrap-app2
-  namespace: openshift-gitops
-  annotations:
-    avp_path: "secret/data/vplugin/supersecret"
-spec:
-  destination:
-    namespace: vplugin-demo
-    server: 'https://kubernetes.default.svc'
-  project: default
-  source:
-    path: applications/<app-name1>
-    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: vault-persistant
-  syncPolicy:
-    automated: {}
-```
-
-```
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: boostrap-app-helm1
-  namespace: openshift-gitops
-  annotations:
-    avp_path: "secret/data/vplugin/supersecret"
-spec:
-  destination:
-    namespace: vplugin-demo
-    server: 'https://kubernetes.default.svc'
-  project: default
-  source:
-    helm:
-      parameters:
-        - name: serviceAccount.name
-          value: app-helm1
-        - name: secret.name
-          value: app-helm1
-        - name: secret.username
-          value: <username>
-        - name: secret.password
-          value: <password>
-    path: applications/app-helm
-    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: vault-persistant
-  syncPolicy:
-    automated: {}
-  ```
-
-```
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: boostrap-app-helm2
-  namespace: openshift-gitops
-  annotations:
-    avp_path: "secret/data/vplugin/supersecret"
-spec:
-  destination:
-    namespace: vplugin-demo
-    server: 'https://kubernetes.default.svc'
-  project: default
-  source:
-    helm:
-      parameters:
-        - name: serviceAccount.name
-          value: app-helm2
-        - name: secret.name
-          value: app-helm2
-        - name: secret.username
-          value: <username>
-        - name: secret.password
-          value: <password>
-    path: applications/app-helm
-    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: vault-persistant
-  syncPolicy:
-    automated: {}
-  ```
-
-### 5 - Test to bootstrap helm application 
-
-oc delete application app-helm -n openshift-gitops
-
-cat << EOF | oc apply -f -
-apiVersion: argoproj.io/v1alpha1
-kind: Application
-metadata:
-  name: app-helm
-  namespace: openshift-gitops
-spec:
-  destination:
-    namespace: vplugin-demo
-    server: 'https://kubernetes.default.svc'
-  project: default
-  source:
-    helm:
-      parameters:
-        - name: serviceAccount.name
-          value: app-helm
-        - name: secret.name
-          value: app-helm
-    path: applications/app-helm
-    repoURL: 'https://github.com/lcolagio/lab-vault-plugin'
-    targetRevision: vault-persistant
-  syncPolicy: {}
-EOF
-
-## Some troubleshooting tips
-
-### 1 - Acces logs from pod openshift-gitops-repo-server-xxxx
-```
-oc -n openshift-gitops logs $(oc get pod -o name | grep openshift-gitops-repo-server-)
+X_VAULT_TOKEN="s.gVCbCRG0BcoZsp51plp4zikJ"
+curl -k --header "X-Vault-Token: $X_VAULT_TOKEN" http://vault.vault.svc:8200/v1/secret/data/vplugin/supersecret
+{"request_id":"40c7e00b-78bf-5f21-bf7f-9681c9860519","lease_id":"","renewable":false,"lease_duration":0,"data":{"data":{"app-name1":"app-ex1","app-name2":"app-ex2","app-path":"app-to-bootstrap","password":"pass-from-vault","username":"user-from-vault"},"metadata":{"created_time":"2021-11-30T15:48:32.948978911Z","custom_metadata":null,"deletion_time":"","destroyed":false,"version":1}},"wrap_info":null,"warnings":null,"auth":null}
 ```
 
 
-### 2 - Test connection via Rsh to openshift-gitops-repo-server-xxxx where vault-plugin was added
-```
-oc -n openshift-gitops rsh $(oc get pod -o name | grep openshift-gitops-repo-server-)
-```
+## Annexes
 
-#### Get token SA vplugin
 ```
-OCP_TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
-curl -k --request POST --data '{"jwt": "'"$OCP_TOKEN"'", "role": "vplugin"}' http://vault.vault.svc:8200/v1/auth/kubernetes/login
-```
-Example of correct output
-```
-{"request_id":"1fb5bdac-7c72-46b5-23c9-3045cb948b44","lease_id":"","renewable":false,"lease_duration":0,"data":null,"wrap_info":null,"warnings":null,"auth":{"client_token":"s.rNLGuD9bMaxh6gOrgQgWtcAH","accessor":"zBTGFnN4dWYlMu9xbTuktFrO","policies":["default","vplugin"],"token_policies":["default","vplugin"],"metadata":{"role":"vplugin","service_account_name":"vplugin","service_account_namespace":"openshift-gitops","service_account_secret_name":"vplugin-token-wkpzw","service_account_uid":"d5886f2a-5f80-4214-b6c1-b240b3aec5cb"},"lease_duration":3600,"renewable":true,"entity_id":"5eba6062-885b-03d4-0525-fa51899b916d","token_type":"service","orphan":true}}
-```
-
-#### Get client_token from
-```
-X_VAULT_TOKEN="s.rNLGuD9bMaxh6gOrgQgWtcAH"
-
-curl -k --header "X-Vault-Token: $X_VAULT_TOKEN" http://vault.vault.svc:8200/v1/vplugin/data/example/example-auth
-```
-
-Example of correct output
-```
-{"request_id":"53362ea2-85a8-157e-ec86-66c59d8de4ac","lease_id":"","renewable":false,"lease_duration":0,"data":{"data":{"app-name1":"app-ex1","app-name2":"app-ex2","app-path":"app-to-bootstrap","password":"pass-from-vault","username":"user-from-vault"},"metadata":{"created_time":"2021-08-24T09:08:15.000352374Z","deletion_time":"","destroyed":false,"version":1}},"wrap_info":null,"warnings":null,"auth":null}
-```
-
-### Error examples
-
-#### error 400 : No vault server available
-```
-rpc error: code = Unknown desc = Manifest generation error (cached): `argocd-vault-plugin generate ./` failed exit status 1: Error: Error making API request. URL: PUT http://vault.vault.svc:8200/v1/auth/kubernetes/login Code: 400. Errors: * missing client token Usage: argocd-vault-plugin generate <path> [flags] Flags: -c, --config-path string path to a file containing Vault configuration (YAML, JSON, envfile) to use -h, --help help for generate -s, --secret-name string name of a Kubernetes Secret containing Vault configuration data in the argocd namespace of your ArgoCD host (Only available when used in ArgoCD) Error making API request. URL: PUT http://vault.vault.svc:8200/v1/auth/kubernetes/login Code: 400. Errors: * missing client token
-```
-
-#### No vault plugin service account in openshift-gitops namesapce 
-```
-Unable to create application: application spec is invalid: InvalidSpecError: Unable to generate manifests in app-test2: rpc error: code = Unknown desc = `argocd-vault-plugin generate ./` failed exit status 1: Error: open /var/run/secrets/kubernetes.io/serviceaccount/token: no such file or directory Usage: argocd-vault-plugin generate <path> [flags] Flags: -c, --config-path string path to a file containing Vault configuration (YAML, JSON, envfile) to use -h, --help help for generate -s, --secret-name string name of a Kubernetes Secret containing Vault configuration data in the argocd namespace of your ArgoCD host (Only available when used in ArgoCD) open /var/run/secrets/kubernetes.io/serviceaccount/token: no such file or directory
-```
-
-#### Error 500 : Namespace not authorized
-```
-rpc error: code = Unknown desc = `argocd-vault-plugin generate ./` failed exit status 1: Error: Error making API request. URL: PUT http://vault.vault.svc
-
-
-:8200/v1/auth/kubernetes/login Code: 500. Errors: * namespace not authorized Usage: argocd-vault-plugin generate <path> [flags] Flags: -c, --config-path string path to a file containing Vault configuration (YAML, JSON, envfile) to use -h, --help help for generate -s, --secret-name string name of a Kubernetes Secret containing Vault configuration data in the argocd namespace of your ArgoCD host (Only available when used in ArgoCD) Error making API request. URL: PUT http://vault.vault.svc:8200/v1/auth/kubernetes/login Code: 500. Errors: * namespace not authorized
+oc delete ImageStream argocd-vault-plugin -n ${ARGOCD_VAULT_PLUGIN_NAMESPACE}
+oc delete BuildConfig argocd-vault-plugin -n ${ARGOCD_VAULT_PLUGIN_NAMESPACE}
 ```
 
